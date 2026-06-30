@@ -5,7 +5,8 @@ library(tidyverse)
 library(tuneR)
 library(lubridate)
 library(hms)
-
+library(rebird)
+library(stringr)
 
 # 0. Initialize / load BirdNET model ----
 
@@ -147,6 +148,11 @@ process_station <- function(
     min_confidence = 0.55
 ) {
   
+  start_time <- Sys.time()
+  
+  message("Starting analysis for station: ", station_id)
+  message("Start time: ", format(start_time, "%Y-%m-%d %H:%M:%S"))
+  
   if (audio_type == "mono") {
     
     message("Running mono station: ", station_id)
@@ -182,10 +188,15 @@ process_station <- function(
     stop("audio_type must be either 'mono' or 'stereo'")
   }
   
+  end_time <- Sys.time()
+  duration <- difftime(end_time, start_time, units = "mins")
+  
+  message("Finished analysis for station: ", station_id)
+  message("End time: ", format(end_time, "%Y-%m-%d %H:%M:%S"))
+  message("Total processing time: ", round(as.numeric(duration), 2), " minutes")
+  
   return(results)
 }
-
-
 
 # 3. Run BirdNET for each station----
 
@@ -208,9 +219,9 @@ SL_T01_P1 <- process_station(
 # The script will extract one channel and save it in a temporary
 # mono folder before running BirdNET.
 
-SL_T01_P5 <- process_station(
-  station_id = "SL_T01_P5", # Change this to your station/folder
-  audio_dir = "SL_T1_P5",   # Change this to your station/folder
+SL_T05_P6 <- process_station(
+  station_id = "SL_T05_P6", # Change this to your station/folder
+  audio_dir = "SL_T05_P6",   # Change this to your station/folder
   audio_type = "stereo",    
   channel = "right",        # Change to your desire channel
   model = model,
@@ -250,7 +261,8 @@ birdnet_final <- full_list %>%
     # Convert date
     recording_date = ymd(recording_date_raw),
     
-    # Convert time
+    # Convert time 
+    ##!!! if there are 00:00:00 it return to error, i dont know why!!!
     recording_time = as_hms(
       paste0(
         str_sub(recording_time_raw, 1, 2), ":",
@@ -282,10 +294,37 @@ birdnet_final <- full_list %>%
 
 # glimpse(birdnet_final)
 
+# 6. Verified with ebird dataset and report----
+
+# assign apikey from ebird
+apikey <- 'klf93sf321323mc' # use your own apikey
+
+# Just to check id 
+# regionlist <- ebirdsubregionlist("subnational2", "ID", key = apikey)
+
+# download latest ebird taxonomy
+taxonomy <- ebirdtaxonomy()
+
+# investigate possible bird in Jambi (or specific area)
+localSp <- ebirdregionspecies("ID-SM-JA", key = apikey) # specific hotspot
+localSpecies <- inner_join(localSp, taxonomy)
+
+# cross reference with our birdnet result and report
+birdnet_final_checked <- birdnet_final %>%
+  mutate(
+    scientific_name_clean = str_squish(scientific_name),
+    
+    in_ebird_species = scientific_name_clean %in% str_squish(localSpecies$sciName),
+    
+    # below is optional when you have list from direct observation
+    in_report_species = scientific_name_clean %in% str_squish(report$Scientific_name)
+  ) %>%
+  select(-scientific_name_clean)
 
 
-# 6. Save final output----
+
+# 7. Save final output----
 write_csv(
-  birdnet_final,
+  birdnet_final_checked,
   paste0("birdnet_final_conf_", min_conf, ".csv")
 )
